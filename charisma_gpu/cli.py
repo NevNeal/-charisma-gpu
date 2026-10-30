@@ -15,6 +15,11 @@ are background. One row per image:
     ch_<colour>       charisma's share for that colour (histogram + Lab merge,
                       each merged colour named by the CLUT; matches R
                       charisma(threshold = 0, pavo = FALSE))
+    petal_bullseye    share of pixels that are bullseye-coloured AND on the
+                      petals, not the disk (see petal.py); with --petal, which
+                      is on by default for a CLUT with bullseye, disk and ray
+    disk_red          bullseye-coloured pixels found to be on the disk
+    disk_area         share of the image taken by the disk found
 
 Rows are appended per batch; rerunning with the same --out skips files that
 are already there.
@@ -29,25 +34,37 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from PIL import Image
 
 from .core import DEFAULT_CLUT, RHIRTA_CLUT, Clut, charisma_batch, classify_pixels
-from .io import png_pixels
+from .petal import petal_bullseye
 
 BUILTIN = {"default": DEFAULT_CLUT, "rudbeckia_hirta": RHIRTA_CLUT}
 
 
+PETAL_COLS = ("petal_bullseye", "disk_red", "disk_area")
+
+
 class _Files(torch.utils.data.Dataset):
-    def __init__(self, files):
-        self.files = files
+    """Reads each cut-out (and runs the petal step, which needs the 2-D image)
+    in the DataLoader's worker processes."""
+
+    def __init__(self, files, clut, petal):
+        self.files, self.clut, self.petal = files, clut, petal
 
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, i):
         try:
-            return self.files[i], png_pixels(self.files[i]), ""
+            a = np.asarray(Image.open(self.files[i]).convert("RGBA"))
+            fg = a[..., 3] >= 128          # R charisma's round(alpha) >= 1
+            shares = None
+            if self.petal and fg.any():
+                shares = petal_bullseye(a[..., :3], fg, self.clut)["shares"]
+            return self.files[i], a[fg][:, :3], shares, ""
         except Exception as exc:
-            return self.files[i], None, f"{type(exc).__name__}: {exc}"
+            return self.files[i], None, None, f"{type(exc).__name__}: {exc}"
 
 
 def _items(batch):
@@ -70,12 +87,19 @@ def main(argv=None):
     p.add_argument("--mode", choices=("both", "pixel", "charisma"), default="both")
     p.add_argument("--bins", type=int, default=4)
     p.add_argument("--cutoff", type=float, default=20.0)
+    p.add_argument("--petal", choices=("auto", "on", "off"), default="auto",
+                   help="petal-vs-disk bullseye split; auto = on when the CLUT has "
+                        "bullseye, disk and ray colours")
     p.add_argument("--batch", type=int, default=256, help="images per GPU batch")
     p.add_argument("--workers", type=int, default=8, help="image-reading processes")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args(argv)
 
     clut = Clut.from_csv(BUILTIN.get(args.clut, args.clut))
+    can_petal = {"bullseye", "disk", "ray"} <= set(clut.names)
+    if args.petal == "on" and not can_petal:
+        raise SystemExit("--petal on needs a CLUT with bullseye, disk and ray colours")
+    petal = args.petal == "on" or (args.petal == "auto" and can_petal)
     root = Path(args.images_dir)
     # *.png and *.PNG are the same files on case-insensitive filesystems
     found = {os.path.normcase(os.path.abspath(f)): f
@@ -95,16 +119,20 @@ def main(argv=None):
         cols += [f"px_{n}" for n in clut.names] + [f"px_{n}_rgb" for n in clut.names]
     if args.mode in ("both", "charisma"):
         cols += ["ch_k"] + [f"ch_{n}" for n in clut.names]
+    if petal:
+        cols += list(PETAL_COLS)
     loader = torch.utils.data.DataLoader(
-        _Files(todo), batch_size=args.batch, num_workers=args.workers, collate_fn=_items,
+        _Files(todo, clut, petal), batch_size=args.batch, num_workers=args.workers, collate_fn=_items,
         prefetch_factor=4 if args.workers else None)
     header, start, n = not out.exists(), time.time(), 0
     for batch in loader:
         recs = []
         good = []
-        for f, px, err in batch:
+        for f, px, shares, err in batch:
             rec = {"file": str(Path(f).relative_to(root)), "error": err,
                    "n_pixels": 0 if px is None else len(px)}
+            if shares:
+                rec.update({k: round(float(shares[k]), 5) for k in PETAL_COLS})
             recs.append(rec)
             if px is not None and len(px):
                 good.append((rec, px))

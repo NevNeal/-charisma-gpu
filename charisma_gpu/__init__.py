@@ -15,5 +15,6 @@ from .core import (CLUT_DIR, DEFAULT_CLUT, RHIRTA_CLUT, Clut, charisma_batch,  #
                    classify_pixels, complete_linkage_groups, lab_to_srgb, srgb_to_hsv,
                    srgb_to_lab)
 from .io import mask_pixels, png_pixels  # noqa: F401
+from .petal import petal_bullseye  # noqa: F401
 
 __version__ = "0.1.0"

@@ -89,8 +89,9 @@ def build(photos, out):
                   "reading. <b>measured</b>"],
         ["Not reproduced", "pavo adjacency statistics (pavo = TRUE), interactive sessions, "
                            "diagnostic plots"],
-        ["Added", "Per-pixel CLUT classification, and an <i>R. hirta</i> CLUT separating "
-                  "bullseye, disk and ray"],
+        ["Added", "Per-pixel CLUT classification; an <i>R. hirta</i> CLUT separating "
+                  "bullseye, disk and ray; and a spatial step that counts bullseye only on the "
+                  "petals, not on red disks (section 7)"],
     ], [1.4, 5.4])
 
     P("2. What R charisma does", h2)
@@ -255,7 +256,7 @@ def build(photos, out):
       "0–2%, except one at 4% that does have a faint red ring. Near-black maroon ray bases are "
       "the same colour as dark disks, and no colour rule can separate them. Telling them apart "
       "needs position: the disk is the central compact region, and the bullseye lies on the "
-      "rays. That would be a spatial step after classification, and is not done here.", body)
+      "rays. Section 7 adds that step.", body)
 
     figure(ph("classmap_bullseye_set.png"),
            "Figure 2. Bullseye flowers (and two plain ones, bottom right): each cut-out beside its "
@@ -263,19 +264,68 @@ def build(photos, out):
     figure(ph("classmap_holdout.png"),
            "Figure 3. Twelve flowers not used for tuning.")
 
-    P("7. The full <i>R. hirta</i> run", h2)
-    P("All 126,653 SAM3 segments of taxon 62741's flower-detected photos (38,273 photos, cut-out "
-      "PNGs, median 1,700 pixels) were classified on the RTX 4060 in about 2 minutes, with no "
-      "errors. Per segment, the median per-pixel shares were 86% ray, 12% disk and 0.2% bullseye. "
-      "10,655 segments have at least 5% bullseye, and 3,694 have at least 15%. The segments with "
-      "the highest bullseye share are red, orange-red and mahogany-rayed forms, where the whole "
-      "ray is red. A few may be other species. Segments include SAM3's low-scoring masks: filter "
-      "by mask score once the run's metadata (results.csv) is joined on photo_id and mask_index.")
-    figure(ph("full_run_top_bullseye.png"),
-           "Figure 4. The 40 segments (>= 2,000 px) with the highest per-pixel bullseye share.")
-    figure(ph("full_run_random.png"), "Figure 5. 40 random segments (>= 2,000 px).")
+    P("7. Red on the petals only", h2)
+    P("On the full run, the CLUT painted many disks red: reddish-brown and mahogany disks, and "
+      "disks whose outer florets are bright red-brown, have the colour of a bullseye. Only red on "
+      "the petals is wanted. <font face='Courier'>charisma_gpu/petal.py</font> finds the disk by "
+      "its shape, after the per-pixel CLUT, on each cut-out's 2-D image:")
+    table(["Step", "What it does"], [
+        ["Core", "foreground pixels that are dark (value &lt; 45) or named disk or other, and not "
+                 "ray, green or pale; holes filled (pink anther centres, highlights)"],
+        ["Disk", "the largest connected piece of the core, morphologically opened with a disc of "
+                 "radius 0.6 × its largest inscribed radius r0. Petal-base patches are narrower "
+                 "than the disk and are erased; the round disk survives. Kept only if compact "
+                 "(area &lt;= 4πr0²), so a ring of maroon petal bases, in a cut-out where SAM3 "
+                 "left the disk out, is not taken for a disk. Grown by 0.15 r0"],
+        ["Red-rimmed disks", "the disk is found again with red pixels also seeding the core. "
+                             "That version is kept if its radius is at most 0.28 of the "
+                             "flower's (95th-percentile distance from its centre). A red rim "
+                             "stops at the disk edge (0.15–0.21 of the flower in testing). A "
+                             "bright bullseye ring touching the disk runs out along the petals "
+                             "(0.34–0.50), so it isn't absorbed"],
+        ["Split", "bullseye-coloured pixels inside the disk → <b>disk_red</b>; elsewhere → "
+                  "<b>petal_bullseye</b>"],
+    ], [1.3, 5.5])
+    P("Colour was checked first and doesn't work. Red disk rims and orange-red bullseyes share "
+      "hue 15–25°, saturation 65–90% and value 45–65%. Texture (dark pixels next to red ones) "
+      "overlaps too: 0.07–0.36 for rims against 0.03–0.23 for bullseyes.")
+    table(["", "Colour only (px_bullseye)", "Petals only (petal_bullseye)"], [
+        ["22 plain flowers: red share, mean / worst", "1.2% / 4.3%", "0.13% / 2.2%"],
+        ["Hand-boxed bullseye pixels kept", "84% (named bullseye)", "74% of those, kept on the petals"],
+        ["... per flower", "", "85–100% on 5 of 6; 41% on 381793369"],
+        ["Disk-box pixels called bullseye", "0.3%", "0%"],
+        ["Clear rings (50311663, 498837000, 529395248)", "47%, 20%, 14%", "45%, 20%, 13%"],
+    ], [2.6, 2.0, 2.2])
+    P("The loss on 381793369 is the case the method can't handle: a maroon ring touching its "
+      "disk with no gap is one solid blob, and is counted as disk. A disk that is never found "
+      "(fragmented, or not compact) leaves its red on the petals: in a sample of 30 segments "
+      "with at least 5% red, that was one fully (68033493, 7%) and one side-view cone partly "
+      "(386207557, 5%). Orange-rayed flowers can pick up a few percent from red specks on the "
+      "rays.", body)
+    figure(ph("petal_before_after.png"),
+           "Figure 4. 30 random segments that the colour-only CLUT gave at least 5% red, none "
+           "used for tuning: cut-out | colour-only class map | after the disk step (cyan = disk "
+           "found; red = petal bullseye).")
 
-    P("8. Reproducing this", h2)
+    P("8. The full <i>R. hirta</i> run", h2)
+    P("All 126,653 SAM3 segments of taxon 62741's flower-detected photos (38,273 photos, cut-out "
+      "PNGs, median 1,700 pixels) were classified on the RTX 4060 with no errors. That took about "
+      "2 minutes without the petal step, and 3.6 minutes (592 segments/s) with it. Per segment, "
+      "the median per-pixel shares were 86% ray, 12% disk and 0.2% red.")
+    table(["Segments with red of at least", "Colour only", "On the petals"], [
+        ["5%", "10,655", "5,515"],
+        ["15%", "3,694", "2,468"],
+        ["Mean share of the segment", "1.9%", "0.95% (another 0.98% was on the disk)"],
+    ], [2.6, 1.6, 2.6])
+    P("The segments with the most red on the petals are red, orange-red and mahogany-rayed "
+      "forms, where the whole ray is red. A few may be other species. Segments include SAM3's "
+      "low-scoring masks: filter by mask score once the run's metadata (results.csv) is joined "
+      "on photo_id and mask_index.")
+    figure(ph("full_run_top_bullseye.png"),
+           "Figure 5. The 40 segments (>= 2,000 px) with the highest per-pixel bullseye share.")
+    figure(ph("full_run_random.png"), "Figure 6. 40 random segments (>= 2,000 px).")
+
+    P("9. Reproducing this", h2)
     C("pip install -e .\n"
       "pytest tests/                                   # parity with R, no R needed\n"
       "charisma-gpu CUTOUTS/ --out colours.csv --clut rudbeckia_hirta\n"
