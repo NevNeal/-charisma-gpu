@@ -1,0 +1,16 @@
+tests/data/synthetic_00.png
+tests/data/synthetic_01.png
+tests/data/synthetic_02.png
+tests/data/synthetic_03.png
+tests/data/synthetic_04.png
+tests/data/synthetic_05.png
+tests/data/synthetic_06.png
+tests/data/synthetic_07.png
+tests/data/synthetic_08.png
+tests/data/synthetic_09.png
+tests/data/synthetic_10.png
+tests/data/synthetic_11.png
+tests/data/synthetic_12.png
+tests/data/synthetic_13.png
+tests/data/synthetic_14.png
+tests/data/synthetic_15.png
